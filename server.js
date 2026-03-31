@@ -12,32 +12,22 @@ let lastUpdate = null;
 async function fetchKNDC() {
   let browser;
   try {
-    console.log("🔄 Запуск парсинга с ожиданием данных...");
+    console.log("🔄 Попытка парсинга Интерактивного бюллетеня...");
     browser = await puppeteer.launch({
       headless: "new",
       args: ["--no-sandbox", "--disable-setuid-sandbox"]
     });
     const page = await browser.newPage();
     
-    // 1. Идем на страницу
+    // Переходим на страницу, где таблица всегда есть в DOM
     await page.goto("https://kndc.kz", {
       waitUntil: "networkidle2",
       timeout: 60000
     });
 
-    // 2. Ждем, пока в таблице появится хотя бы одна строка с данными (кроме заголовка)
-    // Мы ищем строку, где есть класс или где во второй колонке есть цифры
-    try {
-        await page.waitForFunction(() => {
-            const rows = document.querySelectorAll("table tr");
-            return rows.length > 2; // Ждем, пока строк станет больше, чем просто заголовок
-        }, { timeout: 20000 });
-    } catch (e) {
-        console.log("⚠️ Таблица не догрузилась вовремя, пробуем парсить что есть...");
-    }
-
-    // 3. Пауза для окончательной отрисовки
-    await new Promise(r => setTimeout(r, 3000));
+    // Ждем появления хотя бы одной ячейки таблицы
+    await page.waitForSelector('table td', { timeout: 20000 });
+    await new Promise(r => setTimeout(r, 5000)); // Даем время на отрисовку JS-скриптов карты
 
     const earthquakes = await page.evaluate(() => {
       const rows = Array.from(document.querySelectorAll("table tr"));
@@ -45,29 +35,34 @@ async function fetchKNDC() {
       return rows.map(row => {
         const cols = Array.from(row.querySelectorAll("td")).map(td => td.innerText.trim());
         
-        // Индексы для Alarm Bulletin (Срочные донесения):
-        // 0: Дата/Время, 1: Lat, 2: Lon, 6: mb, 7: mpv, 10: Region
-        const lat = parseFloat(cols);
-        
-        if (cols.length >= 7 && !isNaN(lat)) {
+        // В интерактивном бюллетене порядок часто такой:
+        // 0: Время, 1: Lat, 2: Lon, 3: mb/mag, 4: K, 5: Глубина, 6: Регион
+        const lat = parseFloat(cols[1]);
+        const lon = parseFloat(cols[2]);
+
+        if (!isNaN(lat) && !isNaN(lon) && cols.length >= 5) {
           return {
-            datetime: cols.split('\n'), // Чистое время
-            lat: cols,
-            lon: cols,
-            mag: cols || cols || cols || "0", // Пробуем mb, mpv или K
-            region: cols || cols[cols.length - 1] || "Центральная Азия"
+            datetime: cols[0].split('\n')[0], // Берем только дату
+            lat: lat.toString(),
+            lon: lon.toString(),
+            mag: cols[3] || cols[4] || "0", // Пробуем mb или K
+            region: cols[6] || "Центральная Азия"
           };
         }
         return null;
       }).filter(item => item !== null);
     });
 
-    cache = earthquakes;
-    lastUpdate = new Date();
-    console.log(`✅ Успешно! Найдено событий: ${earthquakes.length}`);
+    if (earthquakes.length > 0) {
+      cache = earthquakes;
+      lastUpdate = new Date();
+      console.log(`✅ Найдено событий: ${earthquakes.length}`);
+    } else {
+      console.log("⚠️ Таблица найдена, но данных внутри нет.");
+    }
 
   } catch (e) {
-    console.log("❌ Критическая ошибка парсинга:", e.message);
+    console.log("❌ Ошибка:", e.message);
   } finally {
     if (browser) await browser.close();
   }
