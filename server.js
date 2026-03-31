@@ -1,18 +1,10 @@
 const express = require("express");
 const puppeteer = require("puppeteer");
 const cors = require("cors");
-
 const app = express();
-
-// ✅ РАЗРЕШАЕМ CORS (чтобы Tilda могла забирать данные)
 app.use(cors());
-
 let cache = [];
 let lastUpdate = null;
-
-// Защита от падений
-process.on("uncaughtException", err => console.error(err));
-process.on("unhandledRejection", err => console.error(err));
 
 // Обработка ошибок
 process.on("uncaughtException", err => console.error("GLOBAL ERROR:", err));
@@ -20,7 +12,7 @@ process.on("uncaughtException", err => console.error("GLOBAL ERROR:", err));
 async function fetchKNDC() {
     let browser;
     try {
-        console.log("🔄 Запуск парсинга...");
+        console.log("🔄 Обновление данных за последние 24 часа...");
         browser = await puppeteer.launch({
             headless: "new",
             args: ["--no-sandbox", "--disable-setuid-sandbox"]
