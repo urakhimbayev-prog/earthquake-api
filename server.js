@@ -1,8 +1,11 @@
 const express = require("express");
 const puppeteer = require("puppeteer");
-const cors = require("cors");
+const cors = require("cors"); // 1. Сначала импортируем cors
+
+const app = express(); // 2. СОЗДАЕМ app (эта строка должна быть ВЫШЕ всех app.use)
+
 app.use(cors());
-const app = express();
+
 let cache = [];
 let lastUpdate = null;
 
