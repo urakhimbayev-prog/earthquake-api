@@ -1,6 +1,6 @@
 const express = require("express");
 const cors = require("cors");
-const axios = require("axios"); // Установите: npm install axios
+const axios = require("axios");
 
 const app = express();
 app.use(cors());
@@ -12,8 +12,8 @@ async function fetchKNDC() {
   try {
     console.log("🔄 Запрос данных напрямую через API KNDC...");
     
-    // Прямой URL к базе данных (без привязки к старой странице)
-    const url = "https://kndc.kz";
+    // ✅ Полный рабочий URL с параметрами сортировки и лимита
+    const url = "https://kndc.kz/kndc/pagecontent/alarm-bulletin/getOriginList.php?orderby=epochtime&desc=no&activepage=293&start=5839&limit=20";
     
     const response = await axios.get(url, {
       headers: {
@@ -23,16 +23,15 @@ async function fetchKNDC() {
     });
 
     const resData = response.data;
-    // Определяем, где лежат данные: в resData.rows или в самом resData
-    const items = Array.isArray(resData) ? resData : (resData.rows || []);
+    
+    // Данные в этом API лежат в поле .rows
+    const items = resData.rows || [];
 
     if (items.length > 0) {
       cache = items.map(item => ({
-        // Пытаемся найти время события (бывает datetime или epochtime)
         datetime: item.datetime || item.date_time || item.epochtime || "—",
         lat: item.lat || item.latitude,
         lon: item.lon || item.longitude,
-        // Магнитуда: пробуем разные колонки (mb, mpv, ml, k)
         mag: item.mb || item.mpv || item.ml || item.mag || item.k || "0",
         region: item.region || item.location || "Центральная Азия",
         depth: item.depth || "-"
@@ -42,20 +41,17 @@ async function fetchKNDC() {
       console.log(`✅ Данные обновлены! Найдено событий: ${cache.length}`);
     } else {
       console.log("⚠️ Сервер ответил, но список событий пуст.");
-      // Для отладки выведем структуру ответа в консоль Railway
-      console.log("Структура ответа:", JSON.stringify(resData).substring(0, 200));
-    }
- else {
-      console.log("⚠️ API ответило, но данных в поле 'rows' нет.");
+      // Выводим в лог первые 100 символов ответа для проверки структуры
+      console.log("Ответ от сервера:", JSON.stringify(resData).substring(0, 100));
     }
   } catch (e) {
-    console.error("❌ Ошибка прямого запроса:", e.message);
+    console.error("❌ Ошибка запроса:", e.message);
   }
 }
 
-// Запуск каждые 15 минут
-setInterval(fetchKNDC, 900000);
+// Запуск парсинга сразу и потом каждые 15 минут
 setTimeout(fetchKNDC, 2000);
+setInterval(fetchKNDC, 900000);
 
 app.get("/earthquakes", (req, res) => {
   res.json({
@@ -65,7 +61,7 @@ app.get("/earthquakes", (req, res) => {
   });
 });
 
-app.get("/", (req, res) => res.send("KNDC Fast API is running."));
+app.get("/", (req, res) => res.send("KNDC Fast API is running. Go to /earthquakes"));
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, "0.0.0.0", () => {
