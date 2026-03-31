@@ -27,28 +27,27 @@ async function fetchKNDC() {
     
     await new Promise(r => setTimeout(r, 5000));
 
-    const earthquakes = await page.evaluate(() => {
-      const rows = Array.from(document.querySelectorAll("table tr"));
-      return rows.map(row => {
-        const cols = Array.from(row.querySelectorAll("td")).map(td => td.innerText.trim());
-        
-        // ПРОВЕРКА: 
-        // 1. В строке должно быть 7 или более колонок
-        // 2. Вторая колонка (индекс 1) должна быть числом (Широта)
-        const latValue = parseFloat(cols[1]);
-        
-        if (cols.length >= 7 && !isNaN(latValue)) {
-          return {
-            datetime: cols[0].split('\n')[0], // Берем только дату/время до переноса строки
-            lat: cols[1], // Широта
-            lon: cols[2], // Долгота
-            mag: cols[4], // Магнитуда (обычно 5-я колонка в аларм-бюллетене)
-            region: cols[cols.length - 1] || "Центральная Азия"
-          };
-        }
-        return null;
-      }).filter(item => item !== null);
-    });
+const earthquakes = await page.evaluate(() => {
+  const rows = Array.from(document.querySelectorAll("table tr"));
+  return rows.map(row => {
+    const cols = Array.from(row.querySelectorAll("td")).map(td => td.innerText.trim());
+    
+    // Проверка: Lat (индекс 1) должно быть числом
+    const lat = parseFloat(cols[1]);
+    if (cols.length >= 10 && !isNaN(lat)) {
+      return {
+        // Убираем текст "N часов назад", оставляем только дату
+        datetime: cols[0].split('\n')[0], 
+        lat: cols[1], // Широта
+        lon: cols[2], // Долгота
+        mag: cols[6] || cols[7] || "0", // Берем mb (индекс 6) или mpv (индекс 7)
+        region: cols[10] || "EASTERN KAZAKHSTAN" // Регион (индекс 10)
+      };
+    }
+    return null;
+  }).filter(item => item !== null);
+});
+
 
     if (earthquakes.length >= 0) {
       cache = earthquakes;
