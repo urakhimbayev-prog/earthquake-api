@@ -22,20 +22,30 @@ async function fetchKNDC() {
       }
     });
 
-    if (response.data && Array.isArray(response.data.rows)) {
-      // Форматируем данные из формата KNDC в наш стандарт
-      cache = response.data.rows.map(item => ({
-        datetime: item.datetime || item.epochtime,
-        lat: item.lat,
-        lon: item.lon,
-        mag: item.mb || item.mpv || item.ml || "0",
-        region: item.region || "Центральная Азия",
+    const resData = response.data;
+    // Определяем, где лежат данные: в resData.rows или в самом resData
+    const items = Array.isArray(resData) ? resData : (resData.rows || []);
+
+    if (items.length > 0) {
+      cache = items.map(item => ({
+        // Пытаемся найти время события (бывает datetime или epochtime)
+        datetime: item.datetime || item.date_time || item.epochtime || "—",
+        lat: item.lat || item.latitude,
+        lon: item.lon || item.longitude,
+        // Магнитуда: пробуем разные колонки (mb, mpv, ml, k)
+        mag: item.mb || item.mpv || item.ml || item.mag || item.k || "0",
+        region: item.region || item.location || "Центральная Азия",
         depth: item.depth || "-"
       }));
       
       lastUpdate = new Date();
       console.log(`✅ Данные обновлены! Найдено событий: ${cache.length}`);
     } else {
+      console.log("⚠️ Сервер ответил, но список событий пуст.");
+      // Для отладки выведем структуру ответа в консоль Railway
+      console.log("Структура ответа:", JSON.stringify(resData).substring(0, 200));
+    }
+ else {
       console.log("⚠️ API ответило, но данных в поле 'rows' нет.");
     }
   } catch (e) {
