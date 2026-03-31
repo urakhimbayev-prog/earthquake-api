@@ -24,21 +24,20 @@ async function fetchKNDC() {
     });
     await new Promise(r => setTimeout(r, 5000));
 
-    const earthquakes = await page.evaluate(() => {
+        const earthquakes = await page.evaluate(() => {
       const rows = Array.from(document.querySelectorAll("table tr"));
       return rows.map(row => {
         const cols = Array.from(row.querySelectorAll("td")).map(td => td.innerText.trim());
         
-        // 1. Проверяем, что это строка с данными (обычно 7-10 колонок)
-        // 2. Исключаем заголовок (где Lat — это слово "Lat")
-        if (cols.length >= 7 && !isNaN(parseFloat(cols[2]))) {
+        // Фильтр: колонок должно быть много, и вторая колонка (Lat) должна быть числом
+        if (cols.length >= 7 && !isNaN(parseFloat(cols[1]))) {
           return {
-            datetime: cols[1].split('\n')[0], // Берем только дату, без "N минут назад"
-            lat: cols[2],
-            lon: cols[3],
-            mag: cols[4], // В аларм-бюллетене магнитуда обычно тут
+            datetime: cols[0].split('\n')[0], // Убираем текст "N минут назад"
+            lat: cols[1],
+            lon: cols[2],
+            mag: cols[4],     // В Alarm Bulletin магнитуда обычно в 5-й колонке
             depth: cols[5],
-            region: cols[cols.length - 1] // Регион обычно последний
+            region: cols[cols.length - 1] || "Регион не указан"
           };
         }
         return null;
