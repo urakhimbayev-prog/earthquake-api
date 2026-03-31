@@ -14,70 +14,92 @@ let lastUpdate = null;
 process.on("uncaughtException", err => console.error(err));
 process.on("unhandledRejection", err => console.error(err));
 
+// Обработка ошибок
+process.on("uncaughtException", err => console.error("GLOBAL ERROR:", err));
+
 async function fetchKNDC() {
-  let browser;
-  try {
-    console.log("🔄 Запуск парсинга данных за 24ч...");
-    browser = await puppeteer.launch({
-      headless: "new",
-      args: ["--no-sandbox", "--disable-setuid-sandbox"]
-    });
+    let browser;
+    try {
+        console.log("🔄 Запуск парсинга...");
+        browser = await puppeteer.launch({
+            headless: "new",
+            args: ["--no-sandbox", "--disable-setuid-sandbox"]
+        });
 
-    const page = await browser.newPage();
-    // Идем в раздел срочных донесений (там данные за сутки)
-    await page.goto("https://kndc.kz", {
-      waitUntil: "networkidle2",
-      timeout: 60000
-    });
+        const page = await browser.newPage();
 
-    // Ждем прогрузки таблицы
-    await new Promise(r => setTimeout(r, 5000));
+        // 🎯 ШАГ 1: Перехват сетевых ответов
+        page.on('response', async (response) => {
+            const url = response.url();
+            // Ищем запрос, который содержит данные бюллетеня (обычно json или php с параметрами)
+            if (url.includes("get_bulletin") || url.includes("contentLoader") || url.includes(".json")) {
+                try {
+                    const data = await response.json();
+                    if (Array.isArray(data) && data.length > 0) {
+                        cache = data;
+                        lastUpdate = new Date();
+                        console.log(`✅ Данные получены через перехват API: ${data.length} событий`);
+                    }
+                } catch (e) {
+                    // Не каждый ответ — JSON, это нормально
+                }
+            }
+        });
 
-    const earthquakes = await page.evaluate(() => {
-      const rows = Array.from(document.querySelectorAll("table tr"));
-      return rows.slice(1).map(row => {
-        const cols = Array.from(row.querySelectorAll("td")).map(td => td.innerText.trim());
-        if (cols.length >= 5) {
-          return {
-            datetime: cols[0] + " " + (cols[1] || ""),
-            lat: cols[2],
-            lon: cols[3],
-            mag: cols[4],
-            depth: cols[5] || "-",
-            region: cols[cols.length - 1]
-          };
+        // 🎯 ШАГ 2: Переход на страницу
+        await page.goto("https://kndc.kz/index.php/sejsmicheskie-byulleteni/interactive-bulletin", {
+            waitUntil: "networkidle2",
+            timeout: 60000
+        });
+
+        // 🎯 ШАГ 3: Если перехват не сработал, пробуем вытащить данные из таблицы (DOM)
+        // На kndc данные часто рендерятся в таблицу под картой
+        await page.waitForTimeout(5000); // Даем время на отрисовку
+
+        const tableData = await page.evaluate(() => {
+            const rows = Array.from(document.querySelectorAll('table tr')); // Селектор может меняться
+            return rows.slice(1).map(row => {
+                const cols = row.querySelectorAll('td');
+                if (cols.length < 5) return null;
+                return {
+                    date: cols[0]?.innerText.trim(),
+                    lat: cols[1]?.innerText.trim(),
+                    lon: cols[2]?.innerText.trim(),
+                    mag: cols[3]?.innerText.trim(),
+                    region: cols[5]?.innerText.trim()
+                };
+            }).filter(i => i !== null);
+        });
+
+        if (tableData.length > 0 && cache.length === 0) {
+            cache = tableData;
+            lastUpdate = new Date();
+            console.log(`✅ Данные извлечены из таблицы DOM: ${tableData.length} событий`);
         }
-        return null;
-      }).filter(item => item !== null);
-    });
 
-    if (earthquakes.length >= 0) {
-      cache = earthquakes;
-      lastUpdate = new Date();
-      console.log(`✅ Обновлено: ${earthquakes.length} событий`);
+    } catch (e) {
+        console.error("❌ Ошибка при парсинге:", e.message);
+    } finally {
+        if (browser) await browser.close();
     }
-  } catch (e) {
-    console.log("❌ Ошибка:", e.message);
-  } finally {
-    if (browser) await browser.close();
-  }
 }
 
 // Интервалы
 setTimeout(fetchKNDC, 2000);
-setInterval(fetchKNDC, 1800000); // каждые 30 минут
+setInterval(fetchKNDC, 10 * 60 * 1000); // Раз в 10 минут
 
 app.get("/earthquakes", (req, res) => {
-  res.json({
-    updated: lastUpdate,
-    count: cache.length,
-    data: cache
-  });
+    res.json({
+        success: cache.length > 0,
+        updated: lastUpdate,
+        count: cache.length,
+        data: cache
+    });
 });
 
-app.get("/", (req, res) => res.send("KNDC API is running. Go to /earthquakes"));
+app.get("/", (req, res) => res.send("KNDC Parser is Online"));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => {
-  console.log("Server started on port", PORT);
+    console.log(`🚀 Сервер запущен на порту ${PORT}`);
 });
