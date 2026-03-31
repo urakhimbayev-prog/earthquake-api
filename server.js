@@ -12,61 +12,57 @@ let lastUpdate = null;
 async function fetchKNDC() {
   let browser;
   try {
-    console.log("🔄 Попытка парсинга Интерактивного бюллетеня...");
+    console.log("🔄 Перехват данных через сетевой запрос...");
     browser = await puppeteer.launch({
       headless: "new",
       args: ["--no-sandbox", "--disable-setuid-sandbox"]
     });
     const page = await browser.newPage();
-    
-    // Переходим на страницу, где таблица всегда есть в DOM
+
+    // 🎯 Слушаем все ответы сервера
+    page.on('response', async (response) => {
+      const url = response.url();
+      // Ищем запрос, который подгружает данные бюллетеня
+      if (url.includes("get_bulletin") || url.includes("contentLoader") || url.includes("get_data")) {
+        try {
+          const data = await response.json();
+          if (Array.isArray(data) && data.length > 0) {
+            // Форматируем под наш стандарт
+            cache = data.map(item => ({
+              datetime: item.datetime || item.date || "—",
+              lat: item.lat || item.latitude,
+              lon: item.lon || item.longitude,
+              mag: item.mag || item.mb || item.mpv || "0",
+              region: item.region || item.location || "Центральная Азия"
+            }));
+            lastUpdate = new Date();
+            console.log(`✅ ДАННЫЕ ПЕРЕХВАЧЕНЫ! Найдено событий: ${cache.length}`);
+          }
+        } catch (e) { /* не JSON - игнорируем */ }
+      }
+    });
+
     await page.goto("https://kndc.kz", {
       waitUntil: "networkidle2",
       timeout: 60000
     });
 
-    // Ждем появления хотя бы одной ячейки таблицы
-    await page.waitForSelector('table td', { timeout: 20000 });
-    await new Promise(r => setTimeout(r, 5000)); // Даем время на отрисовку JS-скриптов карты
+    // Ждем 15 секунд, пока карта и скрипты обменяются данными
+    await new Promise(r => setTimeout(r, 15000));
 
-    const earthquakes = await page.evaluate(() => {
-      const rows = Array.from(document.querySelectorAll("table tr"));
-      
-      return rows.map(row => {
-        const cols = Array.from(row.querySelectorAll("td")).map(td => td.innerText.trim());
-        
-        // В интерактивном бюллетене порядок часто такой:
-        // 0: Время, 1: Lat, 2: Lon, 3: mb/mag, 4: K, 5: Глубина, 6: Регион
-        const lat = parseFloat(cols[1]);
-        const lon = parseFloat(cols[2]);
-
-        if (!isNaN(lat) && !isNaN(lon) && cols.length >= 5) {
-          return {
-            datetime: cols[0].split('\n')[0], // Берем только дату
-            lat: lat.toString(),
-            lon: lon.toString(),
-            mag: cols[3] || cols[4] || "0", // Пробуем mb или K
-            region: cols[6] || "Центральная Азия"
-          };
-        }
-        return null;
-      }).filter(item => item !== null);
-    });
-
-    if (earthquakes.length > 0) {
-      cache = earthquakes;
-      lastUpdate = new Date();
-      console.log(`✅ Найдено событий: ${earthquakes.length}`);
-    } else {
-      console.log("⚠️ Таблица найдена, но данных внутри нет.");
+    if (cache.length === 0) {
+       console.log("⚠️ Перехват не удался. Пробуем обновить страницу...");
+       await page.reload({ waitUntil: "networkidle2" });
+       await new Promise(r => setTimeout(r, 10000));
     }
 
   } catch (e) {
-    console.log("❌ Ошибка:", e.message);
+    console.log("❌ Ошибка перехвата:", e.message);
   } finally {
     if (browser) await browser.close();
   }
 }
+
 
 
 // Запуск раз в 30 минут (для оперативных данных)
