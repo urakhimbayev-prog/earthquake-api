@@ -12,10 +12,16 @@ async function fetchKNDC() {
   let browser;
   try {
     console.log("🔄 Запуск Puppeteer для обхода защиты...");
-    browser = await puppeteer.launch({
-      headless: "new",
-      args: ["--no-sandbox", "--disable-setuid-sandbox"]
-    });
+browser = await puppeteer.launch({
+  headless: "new",
+  executablePath: "/usr/bin/google-chrome", // Путь для Railway/Linux
+  args: [
+    "--no-sandbox", 
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--single-process"
+  ]
+});
 
     const page = await browser.newPage();
     
