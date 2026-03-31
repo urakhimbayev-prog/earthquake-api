@@ -78,7 +78,7 @@ async function fetchKNDC() {
 setInterval(fetchKNDC, 1800000);
 setTimeout(fetchKNDC, 1000);
 
-app.get("/earthquakes/today", (req, res) => {
+app.get("/earthquakes", (req, res) => {
   res.json({
     period: "last 24 hours",
     updated: lastUpdate,
