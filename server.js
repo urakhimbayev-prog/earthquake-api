@@ -1,6 +1,7 @@
 const express = require("express");
 const puppeteer = require("puppeteer");
-
+const cors = require("cors");
+app.use(cors());
 const app = express();
 let cache = [];
 let lastUpdate = null;
