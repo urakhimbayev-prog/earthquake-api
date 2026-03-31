@@ -19,48 +19,53 @@ async function fetchKNDC() {
     });
     const page = await browser.newPage();
     
-    // Идем в раздел срочных донесений
+    // Переходим на страницу срочных донесений
     await page.goto("https://kndc.kz", {
       waitUntil: "networkidle2",
       timeout: 60000
     });
-    
+
+    // Ждем появления таблицы (селектор по классу или тегу)
+    await page.waitForSelector('table', { timeout: 15000 });
+    // Небольшая пауза, чтобы данные внутри таблицы отрисовались
     await new Promise(r => setTimeout(r, 5000));
 
-const earthquakes = await page.evaluate(() => {
-  const rows = Array.from(document.querySelectorAll("table tr"));
-  return rows.map(row => {
-    const cols = Array.from(row.querySelectorAll("td")).map(td => td.innerText.trim());
-    
-    // Проверка: Lat (индекс 1) должно быть числом
-    const lat = parseFloat(cols[1]);
-    if (cols.length >= 10 && !isNaN(lat)) {
-      return {
-        // Убираем текст "N часов назад", оставляем только дату
-        datetime: cols[0].split('\n')[0], 
-        lat: cols[1], // Широта
-        lon: cols[2], // Долгота
-        mag: cols[6] || cols[7] || "0", // Берем mb (индекс 6) или mpv (индекс 7)
-        region: cols[10] || "EASTERN KAZAKHSTAN" // Регион (индекс 10)
-      };
-    }
-    return null;
-  }).filter(item => item !== null);
-});
+    const earthquakes = await page.evaluate(() => {
+      // Ищем все строки во всех таблицах на странице
+      const rows = Array.from(document.querySelectorAll("table tr"));
+      
+      return rows.map(row => {
+        const cols = Array.from(row.querySelectorAll("td")).map(td => td.innerText.trim());
+        
+        // Отладка индексов:
+        // Широта (Lat) обычно 2-я колонка (индекс 1)
+        // Магнитуда mb (индекс 6), mpv (индекс 7), K (индекс 8)
+        const lat = parseFloat(cols[1]);
+        const lon = parseFloat(cols[2]);
 
+        if (!isNaN(lat) && !isNaN(lon) && cols.length >= 7) {
+          return {
+            datetime: cols[0].split('\n')[0], // Дата без "N минут назад"
+            lat: cols[1],
+            lon: cols[2],
+            mag: cols[6] || cols[7] || cols[8] || "0", // Пробуем mb, mpv или K
+            region: cols[10] || cols[cols.length - 1] || "Центральная Азия"
+          };
+        }
+        return null;
+      }).filter(item => item !== null);
+    });
 
-    if (earthquakes.length >= 0) {
-      cache = earthquakes;
-      lastUpdate = new Date();
-      console.log(`✅ Найдено чистых событий: ${earthquakes.length}`);
-    }
+    cache = earthquakes;
+    lastUpdate = new Date();
+    console.log(`✅ Успешно! Найдено событий: ${earthquakes.length}`);
+
   } catch (e) {
-    console.log("❌ Ошибка:", e.message);
+    console.log("❌ Ошибка парсинга:", e.message);
   } finally {
     if (browser) await browser.close();
   }
 }
-
 
 
 // Запуск раз в 30 минут (для оперативных данных)
