@@ -1,82 +1,63 @@
 const express = require("express");
-const puppeteer = require("puppeteer");
-const cors = require("cors"); // 1. Сначала импортируем cors
+const cors = require("cors");
+const axios = require("axios"); // Установите: npm install axios
 
-const app = express(); // 2. СОЗДАЕМ app (эта строка должна быть ВЫШЕ всех app.use)
-
+const app = express();
 app.use(cors());
 
 let cache = [];
 let lastUpdate = null;
 
 async function fetchKNDC() {
-  let browser;
   try {
-    console.log("🔄 Перехват данных через сетевой запрос...");
-    browser = await puppeteer.launch({
-      headless: "new",
-      args: ["--no-sandbox", "--disable-setuid-sandbox"]
-    });
-    const page = await browser.newPage();
-
-    // 🎯 Слушаем все ответы сервера
-    page.on('response', async (response) => {
-      const url = response.url();
-      // Ищем запрос, который подгружает данные бюллетеня
-      if (url.includes("get_bulletin") || url.includes("contentLoader") || url.includes("get_data")) {
-        try {
-          const data = await response.json();
-          if (Array.isArray(data) && data.length > 0) {
-            // Форматируем под наш стандарт
-            cache = data.map(item => ({
-              datetime: item.datetime || item.date || "—",
-              lat: item.lat || item.latitude,
-              lon: item.lon || item.longitude,
-              mag: item.mag || item.mb || item.mpv || "0",
-              region: item.region || item.location || "Центральная Азия"
-            }));
-            lastUpdate = new Date();
-            console.log(`✅ ДАННЫЕ ПЕРЕХВАЧЕНЫ! Найдено событий: ${cache.length}`);
-          }
-        } catch (e) { /* не JSON - игнорируем */ }
+    console.log("🔄 Запрос данных напрямую через API KNDC...");
+    
+    // Прямой URL к базе данных (без привязки к старой странице)
+    const url = "https://kndc.kz";
+    
+    const response = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win 64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+        'Referer': 'https://kndc.kz'
       }
     });
 
-    await page.goto("https://kndc.kz", {
-      waitUntil: "networkidle2",
-      timeout: 60000
-    });
-
-    // Ждем 15 секунд, пока карта и скрипты обменяются данными
-    await new Promise(r => setTimeout(r, 15000));
-
-    if (cache.length === 0) {
-       console.log("⚠️ Перехват не удался. Пробуем обновить страницу...");
-       await page.reload({ waitUntil: "networkidle2" });
-       await new Promise(r => setTimeout(r, 10000));
+    if (response.data && Array.isArray(response.data.rows)) {
+      // Форматируем данные из формата KNDC в наш стандарт
+      cache = response.data.rows.map(item => ({
+        datetime: item.datetime || item.epochtime,
+        lat: item.lat,
+        lon: item.lon,
+        mag: item.mb || item.mpv || item.ml || "0",
+        region: item.region || "Центральная Азия",
+        depth: item.depth || "-"
+      }));
+      
+      lastUpdate = new Date();
+      console.log(`✅ Данные обновлены! Найдено событий: ${cache.length}`);
+    } else {
+      console.log("⚠️ API ответило, но данных в поле 'rows' нет.");
     }
-
   } catch (e) {
-    console.log("❌ Ошибка перехвата:", e.message);
-  } finally {
-    if (browser) await browser.close();
+    console.error("❌ Ошибка прямого запроса:", e.message);
   }
 }
 
-
-
-// Запуск раз в 30 минут (для оперативных данных)
-setInterval(fetchKNDC, 1800000);
-setTimeout(fetchKNDC, 1000);
+// Запуск каждые 15 минут
+setInterval(fetchKNDC, 900000);
+setTimeout(fetchKNDC, 2000);
 
 app.get("/earthquakes", (req, res) => {
   res.json({
-    period: "last 24 hours",
     updated: lastUpdate,
     count: cache.length,
     data: cache
   });
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`API Server: http://localhost:${PORT}/earthquakes`));
+app.get("/", (req, res) => res.send("KNDC Fast API is running."));
+
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server started on port ${PORT}`);
+});
