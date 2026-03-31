@@ -32,29 +32,20 @@ async function fetchKNDC() {
 
     // 🔥 ПЕРЕХВАТ API
     page.on("response", async (response) => {
-      const url = response.url();
+  const url = response.url();
 
-      if (url.includes("json") || url.includes("event") || url.includes("quake")) {
-        try {
-          const data = await response.json();
+  console.log("URL:", url);
 
-          // адаптация под структуру (универсально)
-          if (data.features) {
-            earthquakes = data.features.map(f => {
-              const [lon, lat, depth] = f.geometry.coordinates;
+  try {
+    const text = await response.text();
 
-              return {
-                lat,
-                lon,
-                depth,
-                mag: f.properties.mag,
-                date: new Date(f.properties.time).toLocaleString()
-              };
-            });
-          }
-        } catch (e) {}
-      }
-    });
+    if (text.includes("lat") || text.includes("lon")) {
+      console.log("🔥 FOUND DATA URL:", url);
+
+      console.log(text.substring(0, 500)); // кусок ответа
+    }
+  } catch (e) {}
+});
 
     await page.goto(
       "https://kndc.kz/index.php/sejsmicheskie-byulleteni/interactive-bulletin",
