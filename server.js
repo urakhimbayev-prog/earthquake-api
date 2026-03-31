@@ -28,69 +28,49 @@ async function fetchKNDC() {
 
     const page = await browser.newPage();
 
+    let earthquakes = [];
+
+    // 🔥 ПЕРЕХВАТ API
+    page.on("response", async (response) => {
+      const url = response.url();
+
+      if (url.includes("json") || url.includes("event") || url.includes("quake")) {
+        try {
+          const data = await response.json();
+
+          // адаптация под структуру (универсально)
+          if (data.features) {
+            earthquakes = data.features.map(f => {
+              const [lon, lat, depth] = f.geometry.coordinates;
+
+              return {
+                lat,
+                lon,
+                depth,
+                mag: f.properties.mag,
+                date: new Date(f.properties.time).toLocaleString()
+              };
+            });
+          }
+        } catch (e) {}
+      }
+    });
+
     await page.goto(
       "https://kndc.kz/index.php/sejsmicheskie-byulleteni/interactive-bulletin",
       { waitUntil: "networkidle2", timeout: 60000 }
     );
 
-    console.log("Page loaded");
+    // даём время загрузке данных
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
-    // 🔍 Вытаскиваем данные прямо из JS-контекста страницы
-    const data = await page.evaluate(() => {
-      const results = [];
-
-      // пытаемся найти маркеры Leaflet
-      if (window.L && window.L.Marker) {
-        document.querySelectorAll(".leaflet-marker-icon").forEach(el => {
-          const lat = el._leaflet_pos?.y;
-          const lon = el._leaflet_pos?.x;
-
-          if (lat && lon) {
-            results.push({
-              lat,
-              lon,
-              mag: Math.random() * 5 // временно
-            });
-          }
-        });
-      }
-
-      return results;
-    });
-
-    // fallback если ничего не нашли
-    if (!data || data.length === 0) {
-      console.log("No markers found, using fallback parsing");
-
-      const text = await page.content();
-
-      const matches = text.match(/lat:\s*([\d.]+).*?lon:\s*([\d.]+)/gs);
-
-      if (matches) {
-        cache = matches.map(m => {
-          const lat = m.match(/lat:\s*([\d.]+)/)[1];
-          const lon = m.match(/lon:\s*([\d.]+)/)[1];
-
-          return {
-            lat: parseFloat(lat),
-            lon: parseFloat(lon),
-            mag: 0,
-            depth: "-",
-            date: new Date().toLocaleString()
-          };
-        });
-      }
+    if (earthquakes.length > 0) {
+      cache = earthquakes;
+      lastUpdate = new Date();
+      console.log("Parsed from API:", earthquakes.length);
     } else {
-      cache = data.map(d => ({
-        ...d,
-        depth: "-",
-        date: new Date().toLocaleString()
-      }));
+      console.log("No API data found");
     }
-
-    lastUpdate = new Date();
-
-    console.log("Parsed:", cache.length);
 
   } catch (e) {
     console.log("Puppeteer error:", e.message);
