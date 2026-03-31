@@ -20,51 +20,63 @@ async function fetchKNDC() {
   let browser;
 
   try {
-    console.log("Launching browser...");
-
     browser = await puppeteer.launch({
       args: ["--no-sandbox", "--disable-setuid-sandbox"]
     });
 
     const page = await browser.newPage();
 
-    let earthquakes = [];
-
-    // 🔥 ПЕРЕХВАТ API
-    page.on("response", async (response) => {
-  const url = response.url();
-
-  console.log("URL:", url);
-
-  try {
-    const text = await response.text();
-
-    if (text.includes("lat") || text.includes("lon")) {
-      console.log("🔥 FOUND DATA URL:", url);
-
-      console.log(text.substring(0, 500)); // кусок ответа
-    }
-  } catch (e) {}
-});
-
     await page.goto(
       "https://kndc.kz/index.php/sejsmicheskie-byulleteni/interactive-bulletin",
       { waitUntil: "networkidle2", timeout: 60000 }
     );
 
-    // даём время загрузке данных
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // ⏳ ждём пока карта загрузит данные
+    await new Promise(resolve => setTimeout(resolve, 7000));
+
+    const earthquakes = await page.evaluate(() => {
+      const results = [];
+
+      // 🔥 перебираем глобальные переменные
+      for (let key in window) {
+        try {
+          const val = window[key];
+
+          // ищем массив с координатами
+          if (Array.isArray(val)) {
+            val.forEach(item => {
+              if (
+                item &&
+                typeof item === "object" &&
+                ("lat" in item || "latitude" in item) &&
+                ("lng" in item || "lon" in item || "longitude" in item)
+              ) {
+                results.push({
+                  lat: item.lat || item.latitude,
+                  lon: item.lng || item.lon || item.longitude,
+                  mag: item.mag || item.magnitude || 0,
+                  depth: item.depth || "-",
+                  date: item.date || new Date().toLocaleString()
+                });
+              }
+            });
+          }
+        } catch (e) {}
+      }
+
+      return results;
+    });
 
     if (earthquakes.length > 0) {
       cache = earthquakes;
       lastUpdate = new Date();
-      console.log("Parsed from API:", earthquakes.length);
+      console.log("Parsed real data:", earthquakes.length);
     } else {
-      console.log("No API data found");
+      console.log("Still no data found");
     }
 
   } catch (e) {
-    console.log("Puppeteer error:", e.message);
+    console.log("Error:", e.message);
   } finally {
     if (browser) await browser.close();
   }
