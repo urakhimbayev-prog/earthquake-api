@@ -18,26 +18,32 @@ async function fetchKNDC() {
       args: ["--no-sandbox", "--disable-setuid-sandbox"]
     });
     const page = await browser.newPage();
+    
+    // Идем в раздел срочных донесений
     await page.goto("https://kndc.kz", {
       waitUntil: "networkidle2",
       timeout: 60000
     });
+    
     await new Promise(r => setTimeout(r, 5000));
 
-        const earthquakes = await page.evaluate(() => {
+    const earthquakes = await page.evaluate(() => {
       const rows = Array.from(document.querySelectorAll("table tr"));
       return rows.map(row => {
         const cols = Array.from(row.querySelectorAll("td")).map(td => td.innerText.trim());
         
-        // Фильтр: колонок должно быть много, и вторая колонка (Lat) должна быть числом
-        if (cols.length >= 7 && !isNaN(parseFloat(cols[1]))) {
+        // ПРОВЕРКА: 
+        // 1. В строке должно быть 7 или более колонок
+        // 2. Вторая колонка (индекс 1) должна быть числом (Широта)
+        const latValue = parseFloat(cols[1]);
+        
+        if (cols.length >= 7 && !isNaN(latValue)) {
           return {
-            datetime: cols[0].split('\n')[0], // Убираем текст "N минут назад"
-            lat: cols[1],
-            lon: cols[2],
-            mag: cols[4],     // В Alarm Bulletin магнитуда обычно в 5-й колонке
-            depth: cols[5],
-            region: cols[cols.length - 1] || "Регион не указан"
+            datetime: cols[0].split('\n')[0], // Берем только дату/время до переноса строки
+            lat: cols[1], // Широта
+            lon: cols[2], // Долгота
+            mag: cols[4], // Магнитуда (обычно 5-я колонка в аларм-бюллетене)
+            region: cols[cols.length - 1] || "Центральная Азия"
           };
         }
         return null;
@@ -55,6 +61,7 @@ async function fetchKNDC() {
     if (browser) await browser.close();
   }
 }
+
 
 
 // Запуск раз в 30 минут (для оперативных данных)
