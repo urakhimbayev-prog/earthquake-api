@@ -1,57 +1,92 @@
 const express = require("express");
 const axios = require("axios");
+const cheerio = require("cheerio");
 
 const app = express();
 
 let cache = [];
+let lastUpdate = null;
 
-// 🇰🇿 границы Казахстана
-function isKazakhstan(lat, lon) {
-  return lat >= 40 && lat <= 56 && lon >= 46 && lon <= 88;
-}
+// защита
+process.on("uncaughtException", err => console.error(err));
+process.on("unhandledRejection", err => console.error(err));
 
-// 🔄 загрузка данных USGS
-async function fetchEarthquakes() {
+// тест
+app.get("/", (req, res) => {
+  res.send("Parser API is running");
+});
+
+// 🔍 парсинг KNDC
+async function fetchKNDC() {
   try {
-    const url = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&orderby=time&limit=200";
+    const url = "https://kndc.kz/index.php/sejsmicheskie-byulleteni/interactive-bulletin";
 
-    const response = await axios.get(url);
-
-    const features = response.data.features;
-
-    const data = features.map(f => {
-      const [lon, lat, depth] = f.geometry.coordinates;
-
-      return {
-        date: new Date(f.properties.time).toLocaleString(),
-        lat,
-        lon,
-        mag: f.properties.mag,
-        depth
-      };
+    const { data } = await axios.get(url, {
+      timeout: 10000,
+      headers: {
+        "User-Agent": "Mozilla/5.0"
+      }
     });
 
-    cache = data.filter(eq => isKazakhstan(eq.lat, eq.lon));
+    const $ = cheerio.load(data);
+    const earthquakes = [];
 
-    console.log("Updated:", new Date(), "Events:", cache.length);
+    // 🔥 ищем данные внутри script
+    $("script").each((i, el) => {
+      const text = $(el).html();
+
+      if (text && text.includes("lat") && text.includes("lon")) {
+        const matches = text.match(/lat:\s*([\d.]+).*?lon:\s*([\d.]+).*?mag:\s*([\d.]+)/gs);
+
+        if (matches) {
+          matches.forEach(m => {
+            const lat = m.match(/lat:\s*([\d.]+)/)[1];
+            const lon = m.match(/lon:\s*([\d.]+)/)[1];
+            const mag = m.match(/mag:\s*([\d.]+)/)[1];
+
+            earthquakes.push({
+              lat: parseFloat(lat),
+              lon: parseFloat(lon),
+              mag: parseFloat(mag),
+              date: new Date().toLocaleString(),
+              depth: "-"
+            });
+          });
+        }
+      }
+    });
+
+    // fallback если не нашли
+    if (earthquakes.length === 0) {
+      console.log("No data parsed, using fallback");
+    } else {
+      cache = earthquakes;
+      lastUpdate = new Date();
+    }
+
+    console.log("Parsed:", earthquakes.length);
 
   } catch (e) {
-    console.log("Error fetching USGS:", e.message);
+    console.log("Parse error:", e.message);
   }
 }
 
-// первый запуск + каждые 10 минут
-fetchEarthquakes();
-setInterval(fetchEarthquakes, 600000);
+// запуск
+setTimeout(fetchKNDC, 2000);
+setInterval(fetchKNDC, 600000);
 
-// API endpoint
+// API
 app.get("/earthquakes", (req, res) => {
-  res.json(cache);
+  res.json({
+    updated: lastUpdate,
+    count: cache.length,
+    data: cache
+  });
 });
 
-// ⚠️ важно для Railway
+// порт
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
-  console.log("API started on port", PORT);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("Parser started");
 });
