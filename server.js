@@ -12,44 +12,50 @@ let lastUpdate = null;
 async function fetchKNDC() {
   let browser;
   try {
-    console.log("🔄 Запуск парсинга...");
+    console.log("🔄 Запуск парсинга с ожиданием данных...");
     browser = await puppeteer.launch({
       headless: "new",
       args: ["--no-sandbox", "--disable-setuid-sandbox"]
     });
     const page = await browser.newPage();
     
-    // Переходим на страницу срочных донесений
+    // 1. Идем на страницу
     await page.goto("https://kndc.kz", {
       waitUntil: "networkidle2",
       timeout: 60000
     });
 
-    // Ждем появления таблицы (селектор по классу или тегу)
-    await page.waitForSelector('table', { timeout: 15000 });
-    // Небольшая пауза, чтобы данные внутри таблицы отрисовались
-    await new Promise(r => setTimeout(r, 5000));
+    // 2. Ждем, пока в таблице появится хотя бы одна строка с данными (кроме заголовка)
+    // Мы ищем строку, где есть класс или где во второй колонке есть цифры
+    try {
+        await page.waitForFunction(() => {
+            const rows = document.querySelectorAll("table tr");
+            return rows.length > 2; // Ждем, пока строк станет больше, чем просто заголовок
+        }, { timeout: 20000 });
+    } catch (e) {
+        console.log("⚠️ Таблица не догрузилась вовремя, пробуем парсить что есть...");
+    }
+
+    // 3. Пауза для окончательной отрисовки
+    await new Promise(r => setTimeout(r, 3000));
 
     const earthquakes = await page.evaluate(() => {
-      // Ищем все строки во всех таблицах на странице
       const rows = Array.from(document.querySelectorAll("table tr"));
       
       return rows.map(row => {
         const cols = Array.from(row.querySelectorAll("td")).map(td => td.innerText.trim());
         
-        // Отладка индексов:
-        // Широта (Lat) обычно 2-я колонка (индекс 1)
-        // Магнитуда mb (индекс 6), mpv (индекс 7), K (индекс 8)
-        const lat = parseFloat(cols[1]);
-        const lon = parseFloat(cols[2]);
-
-        if (!isNaN(lat) && !isNaN(lon) && cols.length >= 7) {
+        // Индексы для Alarm Bulletin (Срочные донесения):
+        // 0: Дата/Время, 1: Lat, 2: Lon, 6: mb, 7: mpv, 10: Region
+        const lat = parseFloat(cols);
+        
+        if (cols.length >= 7 && !isNaN(lat)) {
           return {
-            datetime: cols[0].split('\n')[0], // Дата без "N минут назад"
-            lat: cols[1],
-            lon: cols[2],
-            mag: cols[6] || cols[7] || cols[8] || "0", // Пробуем mb, mpv или K
-            region: cols[10] || cols[cols.length - 1] || "Центральная Азия"
+            datetime: cols.split('\n'), // Чистое время
+            lat: cols,
+            lon: cols,
+            mag: cols || cols || cols || "0", // Пробуем mb, mpv или K
+            region: cols || cols[cols.length - 1] || "Центральная Азия"
           };
         }
         return null;
@@ -61,7 +67,7 @@ async function fetchKNDC() {
     console.log(`✅ Успешно! Найдено событий: ${earthquakes.length}`);
 
   } catch (e) {
-    console.log("❌ Ошибка парсинга:", e.message);
+    console.log("❌ Критическая ошибка парсинга:", e.message);
   } finally {
     if (browser) await browser.close();
   }
