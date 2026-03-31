@@ -13,52 +13,49 @@ let lastUpdate = null;
 // Функция для получения данных
 async function fetchKNDC() {
   try {
-    console.log("🔄 Запрос данных напрямую через API KNDC...");
+    console.log("🔄 Запрос данных с имитацией браузера...");
     
-    // Полный URL к API, который вы нашли
     const url = "https://kndc.kz";
     
     const response = await axios.get(url, {
       headers: {
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Pragma': 'no-cache',
+        'Referer': 'https://kndc.kz',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://kndc.kz'
+        'X-Requested-With': 'XMLHttpRequest' // 👈 Это критически важный заголовок для этого API
       },
-      timeout: 10000
+      timeout: 15000
     });
 
     const resData = response.data;
     
-    // 🎯 УМНЫЙ ПОИСК МАССИВА ДАННЫХ
-    let items = [];
-    if (Array.isArray(resData)) {
-      items = resData;
-    } else if (resData && resData.rows && Array.isArray(resData.rows)) {
-      items = resData.rows;
-    } else if (resData && resData.data && Array.isArray(resData.data)) {
-      items = resData.data;
+    // Если сервер все равно прислал строку (HTML), значит JSON не получен
+    if (typeof resData === 'string' && resData.includes('<!DOCTYPE')) {
+       console.log("⚠️ Защита сайта отклонила запрос. Сервер выдал HTML вместо данных.");
+       return;
     }
 
+    let items = Array.isArray(resData) ? resData : (resData.rows || []);
+
     if (items.length > 0) {
-      // 🎯 МАППИНГ ДАННЫХ (используем точные поля из логов)
       cache = items.map(item => ({
-        // Склеиваем дату и время из evdate и evtime
         datetime: (item.evdate && item.evtime) ? `${item.evdate} ${item.evtime}` : (item.datetime || "—"),
-        lat: item.lat || item.latitude || "0",
-        lon: item.lon || item.longitude || "0",
-        // Магнитуда: пробуем mb, mpv или ml
-        mag: item.mb || item.mpv || item.ml || item.mag || "0",
-        region: item.region || item.location || "Центральная Азия",
-        depth: item.depth || "-"
+        lat: item.lat || "0",
+        lon: item.lon || "0",
+        mag: item.mb || item.mpv || item.mag || "0",
+        region: item.region || "Центральная Азия"
       }));
-      
       lastUpdate = new Date();
-      console.log(`✅ УСПЕХ! Данные обновлены. Найдено событий: ${cache.length}`);
+      console.log(`✅ ПОБЕДА! Найдено событий: ${cache.length}`);
     } else {
-      console.log("⚠️ Сервер ответил, но список событий пуст.");
-      console.log("DEBUG (начало ответа):", JSON.stringify(resData).substring(0, 200));
+      console.log("⚠️ Список пуст. Возможно, параметры URL не приняты.");
     }
   } catch (e) {
-    console.error("❌ Ошибка прямого запроса к KNDC:", e.message);
+    console.error("❌ Ошибка соединения:", e.message);
   }
 }
 
