@@ -1,8 +1,7 @@
 const express = require("express");
 const puppeteer = require("puppeteer");
-const cors = require("cors");
+
 const app = express();
-app.use(cors());
 let cache = [];
 let lastUpdate = null;
 
@@ -12,7 +11,7 @@ process.on("uncaughtException", err => console.error("GLOBAL ERROR:", err));
 async function fetchKNDC() {
     let browser;
     try {
-        console.log("🔄 Обновление данных за последние 24 часа...");
+        console.log("🔄 Запуск парсинга...");
         browser = await puppeteer.launch({
             headless: "new",
             args: ["--no-sandbox", "--disable-setuid-sandbox"]
