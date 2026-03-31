@@ -12,8 +12,7 @@ async function fetchKNDC() {
   try {
     console.log("🔄 Запрос данных напрямую через API KNDC...");
     
-    // ✅ Полный рабочий URL с параметрами сортировки и лимита
-    const url = "https://kndc.kz/kndc/pagecontent/alarm-bulletin/getOriginList.php?orderby=epochtime&desc=no&activepage=293&start=5839&limit=20";
+    const url = "https://kndc.kz";
     
     const response = await axios.get(url, {
       headers: {
@@ -22,27 +21,24 @@ async function fetchKNDC() {
       }
     });
 
-    const resData = response.data;
-    
-    // Данные в этом API лежат в поле .rows
-    const items = resData.rows || [];
+    const items = response.data; // Теперь берем данные напрямую из ответа
 
-    if (items.length > 0) {
+    if (Array.isArray(items) && items.length > 0) {
       cache = items.map(item => ({
-        datetime: item.datetime || item.date_time || item.epochtime || "—",
-        lat: item.lat || item.latitude,
-        lon: item.lon || item.longitude,
-        mag: item.mb || item.mpv || item.ml || item.mag || item.k || "0",
-        region: item.region || item.location || "Центральная Азия",
+        // Собираем дату и время из evdate и evtime
+        datetime: `${item.evdate} ${item.evtime}`,
+        lat: item.lat,
+        lon: item.lon,
+        // Берем магнитуду mb или mpv
+        mag: item.mb || item.mpv || "0",
+        region: item.region || "Центральная Азия",
         depth: item.depth || "-"
       }));
       
       lastUpdate = new Date();
       console.log(`✅ Данные обновлены! Найдено событий: ${cache.length}`);
     } else {
-      console.log("⚠️ Сервер ответил, но список событий пуст.");
-      // Выводим в лог первые 100 символов ответа для проверки структуры
-      console.log("Ответ от сервера:", JSON.stringify(resData).substring(0, 100));
+      console.log("⚠️ Сервер ответил, но список пуст или это не массив.");
     }
   } catch (e) {
     console.error("❌ Ошибка запроса:", e.message);
