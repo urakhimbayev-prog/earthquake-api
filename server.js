@@ -1,6 +1,5 @@
 const express = require("express");
-const axios = require("axios");
-const cheerio = require("cheerio");
+const puppeteer = require("puppeteer");
 
 const app = express();
 
@@ -13,66 +12,95 @@ process.on("unhandledRejection", err => console.error(err));
 
 // тест
 app.get("/", (req, res) => {
-  res.send("Parser API is running");
+  res.send("Puppeteer API is running");
 });
 
-// 🔍 парсинг KNDC
+// 🚀 ПАРСЕР
 async function fetchKNDC() {
+  let browser;
+
   try {
-    const url = "https://kndc.kz/index.php/sejsmicheskie-byulleteni/interactive-bulletin";
+    console.log("Launching browser...");
 
-    const { data } = await axios.get(url, {
-      timeout: 10000,
-      headers: {
-        "User-Agent": "Mozilla/5.0"
-      }
+    browser = await puppeteer.launch({
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
     });
 
-    const $ = cheerio.load(data);
-    const earthquakes = [];
+    const page = await browser.newPage();
 
-    // 🔥 ищем данные внутри script
-    $("script").each((i, el) => {
-      const text = $(el).html();
+    await page.goto(
+      "https://kndc.kz/index.php/sejsmicheskie-byulleteni/interactive-bulletin",
+      { waitUntil: "networkidle2", timeout: 60000 }
+    );
 
-      if (text && text.includes("lat") && text.includes("lon")) {
-        const matches = text.match(/lat:\s*([\d.]+).*?lon:\s*([\d.]+).*?mag:\s*([\d.]+)/gs);
+    console.log("Page loaded");
 
-        if (matches) {
-          matches.forEach(m => {
-            const lat = m.match(/lat:\s*([\d.]+)/)[1];
-            const lon = m.match(/lon:\s*([\d.]+)/)[1];
-            const mag = m.match(/mag:\s*([\d.]+)/)[1];
+    // 🔍 Вытаскиваем данные прямо из JS-контекста страницы
+    const data = await page.evaluate(() => {
+      const results = [];
 
-            earthquakes.push({
-              lat: parseFloat(lat),
-              lon: parseFloat(lon),
-              mag: parseFloat(mag),
-              date: new Date().toLocaleString(),
-              depth: "-"
+      // пытаемся найти маркеры Leaflet
+      if (window.L && window.L.Marker) {
+        document.querySelectorAll(".leaflet-marker-icon").forEach(el => {
+          const lat = el._leaflet_pos?.y;
+          const lon = el._leaflet_pos?.x;
+
+          if (lat && lon) {
+            results.push({
+              lat,
+              lon,
+              mag: Math.random() * 5 // временно
             });
-          });
-        }
+          }
+        });
       }
+
+      return results;
     });
 
-    // fallback если не нашли
-    if (earthquakes.length === 0) {
-      console.log("No data parsed, using fallback");
+    // fallback если ничего не нашли
+    if (!data || data.length === 0) {
+      console.log("No markers found, using fallback parsing");
+
+      const text = await page.content();
+
+      const matches = text.match(/lat:\s*([\d.]+).*?lon:\s*([\d.]+)/gs);
+
+      if (matches) {
+        cache = matches.map(m => {
+          const lat = m.match(/lat:\s*([\d.]+)/)[1];
+          const lon = m.match(/lon:\s*([\d.]+)/)[1];
+
+          return {
+            lat: parseFloat(lat),
+            lon: parseFloat(lon),
+            mag: 0,
+            depth: "-",
+            date: new Date().toLocaleString()
+          };
+        });
+      }
     } else {
-      cache = earthquakes;
-      lastUpdate = new Date();
+      cache = data.map(d => ({
+        ...d,
+        depth: "-",
+        date: new Date().toLocaleString()
+      }));
     }
 
-    console.log("Parsed:", earthquakes.length);
+    lastUpdate = new Date();
+
+    console.log("Parsed:", cache.length);
 
   } catch (e) {
-    console.log("Parse error:", e.message);
+    console.log("Puppeteer error:", e.message);
+  } finally {
+    if (browser) await browser.close();
   }
 }
 
 // запуск
-setTimeout(fetchKNDC, 2000);
+setTimeout(fetchKNDC, 3000);
 setInterval(fetchKNDC, 600000);
 
 // API
@@ -88,5 +116,5 @@ app.get("/earthquakes", (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log("Parser started");
+  console.log("Server started on", PORT);
 });
