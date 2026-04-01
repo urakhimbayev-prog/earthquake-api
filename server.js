@@ -9,20 +9,22 @@ let cache = [];
 
 async function fetchKNDC() {
   try {
-    // 🎯 ВОТ ГЛАВНОЕ ОТЛИЧИЕ: мы идем не на главную, 
-    // а на PHP-скрипт, который обслуживает контент-лоадер
+    console.log("🔄 Запрос данных...");
+    
+    // Используем максимально стабильный URL
     const url = "https://kndc.kz";
     
     const response = await axios.get(url, {
       headers: {
-        // Эти заголовки заставляют сервер думать, что запрос пришел от contentLoader.js
-        'X-Requested-With': 'XMLHttpRequest', 
-        'Referer': 'https://kndc.kz',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'X-Requested-With': 'XMLHttpRequest', // КРИТИЧНО: говорит серверу, что это AJAX-запрос
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://kndc.kz'
+      },
+      timeout: 10000
     });
 
-    // Обработка данных (KNDC может прислать массив или объект с полем rows)
+    // KNDC может прислать массив или объект {rows: []}
     const items = response.data.rows || (Array.isArray(response.data) ? response.data : []);
 
     if (items.length > 0) {
@@ -33,12 +35,16 @@ async function fetchKNDC() {
         mag: item.mb || item.mpv || "0",
         region: item.region || "Центральная Азия"
       }));
-      console.log(`✅ ПОБЕДА! Данные получены напрямую: ${cache.length} событий`);
+      lastUpdate = new Date();
+      console.log(`✅ ПОБЕДА! Найдено событий: ${cache.length}`);
+    } else {
+      console.log("⚠️ Список пуст. Проверьте URL в браузере.");
     }
   } catch (e) {
-    console.error("❌ Ошибка прямого запроса:", e.message);
+    console.error("❌ Ошибка:", e.message);
   }
 }
+
 
 // Запуск
 setInterval(fetchKNDC, 600000);
