@@ -1,80 +1,69 @@
 const express = require("express");
 const cors = require("cors");
-const axios = require("axios");
-const { wrapper } = require("axios-cookiejar-support");
-const { CookieJar } = require("tough-cookie");
+const puppeteer = require("puppeteer");
 
 const app = express();
 app.use(cors());
 
-// Настройка хранилища Cookies для обхода защиты KNDC
-const jar = new CookieJar();
-const client = wrapper(axios.create({ jar, withCredentials: true }));
-
 let cache = [];
 let lastUpdate = null;
 
-// Общие заголовки как в твоем curl (имитация iPhone)
-const commonHeaders = {
-  'accept': 'application/json, text/javascript, */*; q=0.01',
-  'accept-language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-  'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1',
-  'x-requested-with': 'XMLHttpRequest'
-};
-
 async function fetchKNDC() {
+  let browser;
   try {
-    console.log("🔄 Шаг 1: Обновление сессии (Cookies)...");
-    await client.get("https://kndc.kz", {
-      headers: { 'user-agent': commonHeaders['user-agent'] }
+    console.log("🔄 Запуск браузера для обхода блокировки IP...");
+    browser = await puppeteer.launch({
+      headless: "new",
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
     });
 
-    console.log("🔄 Шаг 2: Запрос данных (Метод А)...");
-    const urlA = "https://kndc.kz";
-    let response = await client.get(urlA, { 
-      headers: { ...commonHeaders, 'referer': 'https://kndc.kz' } 
+    const page = await browser.newPage();
+    // Имитируем реальный экран iPhone
+    await page.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15');
+
+    // Перехватываем ответы сервера KNDC
+    page.on('response', async (response) => {
+      const url = response.url();
+      if (url.includes("getOriginList.php") || url.includes("get_data.php")) {
+        try {
+          const data = await response.json();
+          const items = data.rows || (Array.isArray(data) ? data : []);
+          if (items.length > 0) {
+            cache = items.map(item => ({
+              datetime: item.datetime || `${item.evdate} ${item.evtime}` || item.date_time,
+              lat: item.lat || item.latitude,
+              lon: item.lon || item.longitude,
+              mag: item.mb || item.mpv || item.mag || "0",
+              region: item.region || item.location || "Центральная Азия"
+            }));
+            lastUpdate = new Date();
+            console.log(`✅ ДАННЫЕ ПОЛУЧЕНЫ! Найдено событий: ${cache.length}`);
+          }
+        } catch (e) {}
+      }
     });
 
-    let items = response.data.rows || (Array.isArray(response.data) ? response.data : []);
+    // Идем на страницу, где данные подгружаются официально
+    await page.goto("https://kndc.kz", {
+      waitUntil: "networkidle2",
+      timeout: 60000
+    });
 
-    // Если Метод А пустой, пробуем Метод Б (Интерактивный бюллетень)
-    if (items.length === 0) {
-      console.log("⚠️ Метод А пуст, пробуем Метод Б (Interactive)...");
-      const urlB = "https://kndc.kz";
-      response = await client.get(urlB, { 
-        headers: { ...commonHeaders, 'referer': 'https://kndc.kz' } 
-      });
-      items = Array.isArray(response.data) ? response.data : (response.data.rows || []);
-    }
+    // Ждем 15 секунд, пока скрипты сайта KNDC «прогрузят» данные
+    await new Promise(r => setTimeout(r, 15000));
 
-    if (items.length > 0) {
-      cache = items.map(item => ({
-        datetime: (item.evdate && item.evtime) ? `${item.evdate} ${item.evtime}` : (item.datetime || item.date_time || "—"),
-        lat: item.lat || item.latitude || "0",
-        lon: item.lon || item.longitude || "0",
-        mag: item.mb || item.mpv || item.mag || item.k || "0",
-        region: item.region || item.location || "Центральная Азия",
-        depth: item.depth || "-"
-      }));
-      lastUpdate = new Date();
-      console.log(`✅ ПОБЕДА! Данные получены. Найдено событий: ${cache.length}`);
-    } else {
-      console.log("❌ Данные не найдены ни одним методом. Ответ сервера:", JSON.stringify(response.data).substring(0, 100));
-    }
   } catch (e) {
-    console.error("❌ Критическая ошибка:", e.message);
+    console.error("❌ Ошибка браузера:", e.message);
+  } finally {
+    if (browser) await browser.close();
   }
 }
 
-// Интервалы
 setInterval(fetchKNDC, 900000); // 15 мин
-setTimeout(fetchKNDC, 2000); // Старт через 2 сек
+setTimeout(fetchKNDC, 5000);
 
-app.get("/earthquakes", (req, res) => {
-  res.json({ updated: lastUpdate, count: cache.length, data: cache });
-});
-
-app.get("/", (req, res) => res.send("KNDC Session API v3 Online"));
+app.get("/earthquakes", (req, res) => res.json({ updated: lastUpdate, count: cache.length, data: cache }));
+app.get("/", (req, res) => res.send("KNDC Browser API Online"));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => console.log(`🚀 Сервер на порту ${PORT}`));
