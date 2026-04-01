@@ -6,51 +6,52 @@ const app = express();
 app.use(cors());
 
 let cache = [];
+let lastUpdate = null;
 
 async function fetchKNDC() {
   try {
-    console.log("🔄 Запрос данных...");
+    console.log("🔄 Запрос данных с использованием расширенных заголовков...");
     
-    // Используем максимально стабильный URL
+    // Используем эндпоинт из твоего curl, но убираем привязку к 293 странице
     const url = "https://kndc.kz";
     
     const response = await axios.get(url, {
       headers: {
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'X-Requested-With': 'XMLHttpRequest', // КРИТИЧНО: говорит серверу, что это AJAX-запрос
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://kndc.kz'
-      },
-      timeout: 10000
+        'accept': 'application/json, text/javascript, */*; q=0.01',
+        'accept-language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+        'referer': 'https://kndc.kz/index.php/sejsmicheskie-byulleteni/alarm-bulletin',
+        'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1',
+        'x-requested-with': 'XMLHttpRequest',
+        'sec-ch-ua': '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-origin'
+      }
     });
 
-    // KNDC может прислать массив или объект {rows: []}
     const items = response.data.rows || (Array.isArray(response.data) ? response.data : []);
 
     if (items.length > 0) {
       cache = items.map(item => ({
-        datetime: item.datetime || `${item.evdate} ${item.evtime}`,
+        datetime: (item.evdate && item.evtime) ? `${item.evdate} ${item.evtime}` : (item.datetime || "—"),
         lat: item.lat,
         lon: item.lon,
-        mag: item.mb || item.mpv || "0",
-        region: item.region || "Центральная Азия"
+        mag: item.mb || item.mpv || item.mag || "0",
+        region: item.region || item.location || "Центральная Азия"
       }));
       lastUpdate = new Date();
       console.log(`✅ ПОБЕДА! Найдено событий: ${cache.length}`);
     } else {
-      console.log("⚠️ Список пуст. Проверьте URL в браузере.");
+      console.log("⚠️ Сервер ответил, но данных нет. Возможно, куки протухли.");
     }
   } catch (e) {
     console.error("❌ Ошибка:", e.message);
   }
 }
 
-
-// Запуск
-setInterval(fetchKNDC, 600000);
+setInterval(fetchKNDC, 900000);
 setTimeout(fetchKNDC, 2000);
 
-app.get("/earthquakes", (req, res) => res.json({ data: cache }));
+app.get("/earthquakes", (req, res) => res.json({ updated: lastUpdate, count: cache.length, data: cache }));
 app.get("/", (req, res) => res.send("API IS RUNNING"));
 
 const PORT = process.env.PORT || 8080;
