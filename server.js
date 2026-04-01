@@ -1,77 +1,51 @@
 const express = require("express");
 const cors = require("cors");
-const puppeteer = require("puppeteer");
+const axios = require("axios");
 
 const app = express();
 app.use(cors());
 
 let cache = [];
-let lastUpdate = null;
 
 async function fetchKNDC() {
-  let browser;
   try {
-    console.log("🔄 Запуск Puppeteer для обхода защиты...");
-browser = await puppeteer.launch({
-  headless: "new",
-  executablePath: "/usr/bin/google-chrome", // Путь для Railway/Linux
-  args: [
-    "--no-sandbox", 
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
-    "--single-process"
-  ]
-});
-
-    const page = await browser.newPage();
+    // 🎯 ВОТ ГЛАВНОЕ ОТЛИЧИЕ: мы идем не на главную, 
+    // а на PHP-скрипт, который обслуживает контент-лоадер
+    const url = "https://kndc.kz";
     
-    // Перехватываем ответы сервера
-    page.on('response', async (response) => {
-      const url = response.url();
-      // Ищем именно тот файл, который вы нашли (getOriginList.php)
-      if (url.includes("getOriginList.php")) {
-        try {
-          const data = await response.json();
-          if (Array.isArray(data) && data.length > 0) {
-            cache = data.map(item => ({
-              datetime: `${item.evdate} ${item.evtime}`,
-              lat: item.lat,
-              lon: item.lon,
-              mag: item.mb || item.mpv || "0",
-              region: item.region || "Центральная Азия"
-            }));
-            lastUpdate = new Date();
-            console.log(`✅ ДАННЫЕ ПЕРЕХВАЧЕНЫ! Событий: ${cache.length}`);
-          }
-        } catch (e) { /* не JSON */ }
+    const response = await axios.get(url, {
+      headers: {
+        // Эти заголовки заставляют сервер думать, что запрос пришел от contentLoader.js
+        'X-Requested-With': 'XMLHttpRequest', 
+        'Referer': 'https://kndc.kz',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       }
     });
 
-    // Идем на страницу, где этот запрос происходит официально
-    await page.goto("https://kndc.kz", {
-      waitUntil: "networkidle2",
-      timeout: 60000
-    });
+    // Обработка данных (KNDC может прислать массив или объект с полем rows)
+    const items = response.data.rows || (Array.isArray(response.data) ? response.data : []);
 
-    // Ждем 15 секунд, чтобы все скрипты на сайте KNDC успели сработать
-    await new Promise(r => setTimeout(r, 15000));
-
+    if (items.length > 0) {
+      cache = items.map(item => ({
+        datetime: item.datetime || `${item.evdate} ${item.evtime}`,
+        lat: item.lat,
+        lon: item.lon,
+        mag: item.mb || item.mpv || "0",
+        region: item.region || "Центральная Азия"
+      }));
+      console.log(`✅ ПОБЕДА! Данные получены напрямую: ${cache.length} событий`);
+    }
   } catch (e) {
-    console.error("❌ Ошибка Puppeteer:", e.message);
-  } finally {
-    if (browser) await browser.close();
+    console.error("❌ Ошибка прямого запроса:", e.message);
   }
 }
 
-// Интервал 15 минут
-setInterval(fetchKNDC, 900000);
+// Запуск
+setInterval(fetchKNDC, 600000);
 setTimeout(fetchKNDC, 2000);
 
-app.get("/earthquakes", (req, res) => {
-  res.json({ updated: lastUpdate, count: cache.length, data: cache });
-});
-
-app.get("/", (req, res) => res.send("KNDC Hybrid API Online"));
+app.get("/earthquakes", (req, res) => res.json({ data: cache }));
+app.get("/", (req, res) => res.send("API IS RUNNING"));
 
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, "0.0.0.0", () => console.log(`🚀 Port: ${PORT}`));
+app.listen(PORT, "0.0.0.0", () => console.log(`Server on port ${PORT}`));
